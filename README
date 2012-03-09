@@ -1,0 +1,5 @@
+* requirement:
+erlmongo
+
+* add line to ejabberd.cfg in modules section:
+{mod_chat_log_mongodb, [{hosts, ["localhost:27017"]}, {db, "xmpp"}, {collection, "message"}]},
