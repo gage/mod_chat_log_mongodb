@@ -62,7 +62,6 @@ init([_Host, Opts]) ->
 	
 	Conn = mongoapi:new(xmpp_mongo, list_to_binary(DB)),
 	Conn:set_encode_style(mochijson),
-	
 	{ok, #state{
 		host = Host,
 		db = DB,
@@ -100,7 +99,7 @@ handle_cast({save,  FromJid, FromHost, FromResource, ToJid, ToHost, ToResource, 
 			{<<"to">>, list_to_binary(ToJid)},
 			{<<"to_host">>, list_to_binary(ToHost)},
 			{<<"to_resource">>, list_to_binary(ToResource)},
-			{<<"content">>, list_to_binary(Body)},
+			{<<"content">>, Body},
 			{<<"timestamp">>, unix_timestamp()},
 			{<<"timestamp_micro">>, now_us(erlang:now())},
 			{<<"type">>, Type}
@@ -121,7 +120,7 @@ log_packet(#jid{domain = Server}, From, To,
     Type = exmpp_xml:get_attribute_from_list(Attrs, <<"type">>, <<>>),
 	case Type of
 		"error" -> %% we don't log errors
-			?DEBUG("dropping error: ~s", [xml:element_to_string(exmpp_xml:xmlel_to_xmlelement(Packet))]),
+			?DEBUG("dropping error: ~s", [xmpp_xml:document_to_list(Packet)]),
 			ok;
 		_ ->
 			save_packet(From, To, Packet, Type)
@@ -132,7 +131,7 @@ log_packet(_JID, _From, _To, _Packet) ->
 
 
 save_packet(From, To, Packet, Type) ->
-	Body = xml:get_path_s(exmpp_xml:xmlel_to_xmlelement(Packet), [{elem, "body"}, cdata]),
+	Body = exmpp_xml:get_cdata(exmpp_xml:get_element(Packet, "body")),
 	case Body of
 		"" -> %% don't log empty messages
 			?DEBUG("not logging empty message from ~s",[From]),
@@ -144,7 +143,6 @@ save_packet(From, To, Packet, Type) ->
 			ToJid = exmpp_jid:prep_node_as_list(To),
 			ToHost = exmpp_jid:prep_domain_as_list(To),
 			ToResource = exmpp_jid:prep_resource_as_list(To),
-			
 			Proc = gen_mod:get_module_proc(ToHost, ?PROCNAME),
 			gen_server:cast(Proc, {save, FromJid, FromHost, FromResource, ToJid, ToHost, ToResource, Body, Type})
 	end.
