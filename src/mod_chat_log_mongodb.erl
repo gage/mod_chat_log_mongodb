@@ -9,7 +9,8 @@
 	 log_user_receive/4,
 	 unix_timestamp/0,
 	 unix_timestamp/1,
-	 now_us/1
+	 now_us/1,
+         check_if_undefined/1
 	 ]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -37,7 +38,7 @@ start_link(Host, Opts) ->
 
 start(Host, Opts) ->
 	HostB = list_to_binary(Host),
-	?INFO_MSG("Starting ~p", [?MODULE]),
+	?INFO_MSG("Starting ~p on ~p", [?MODULE, HostB]),
 	ejabberd_hooks:add(user_receive_packet, HostB, ?MODULE, log_user_receive, 55),
 	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
 
@@ -56,7 +57,6 @@ init([_Host, Opts]) ->
 	Host = gen_mod:get_opt(hosts, Opts, ["localhost:27017"]),
 	DB = gen_mod:get_opt(db, Opts, "xmpp"),
 	Collection = gen_mod:get_opt(collection, Opts, "message"),
-	
 	mongodb:replicaSets(xmpp_mongo, Host),
 	mongodb:connect(xmpp_mongo),
 	
@@ -92,13 +92,20 @@ handle_call(stop, _From, State) ->
 
 handle_cast({save,  FromJid, FromHost, FromResource, ToJid, ToHost, ToResource, Body, Type}, State) ->
 	#state{collection=Collection,conn=Conn} = State,
+    FromJid2 = check_if_undefined(FromJid),
+    FromHost2 = check_if_undefined(FromHost),
+    FromResource2 = check_if_undefined(FromResource),
+    ToJid2 = check_if_undefined(ToJid),
+    ToHost2 = check_if_undefined(ToHost),
+    ToResource2 = check_if_undefined(ToResource),
+          
 	Conn:save(Collection, [
-			{<<"from">>, list_to_binary(FromJid)},
-			{<<"from_host">>, list_to_binary(FromHost)},
-			{<<"from_resource">>, list_to_binary(FromResource)},
-			{<<"to">>, list_to_binary(ToJid)},
-			{<<"to_host">>, list_to_binary(ToHost)},
-			{<<"to_resource">>, list_to_binary(ToResource)},
+			{<<"from">>, FromJid2},
+			{<<"from_host">>, FromHost2},
+			{<<"from_resource">>, FromResource2},
+			{<<"to">>, ToJid2},
+			{<<"to_host">>, ToHost2},
+			{<<"to_resource">>, ToResource2},
 			{<<"content">>, Body},
 			{<<"timestamp">>, unix_timestamp()},
 			{<<"timestamp_micro">>, now_us(erlang:now())},
@@ -133,8 +140,8 @@ log_packet(_JID, _From, _To, _Packet) ->
 save_packet(From, To, Packet, Type) ->
 	Body = exmpp_xml:get_cdata(exmpp_xml:get_element(Packet, "body")),
 	case Body of
-		"" -> %% don't log empty messages
-			?DEBUG("not logging empty message from ~s",[From]),
+		<<"">> -> %% don't log empty messages
+			?DEBUG("not logging empty message from ~p",[From]),
 			ok;
 		_ ->
 			FromJid = exmpp_jid:prep_node_as_list(From),
@@ -160,3 +167,11 @@ unix_timestamp(DT) ->
 now_us({MegaSecs,Secs,MicroSecs}) ->
 	(MegaSecs*1000000 + Secs)*1000000 + MicroSecs. 
 
+check_if_undefined(Val) ->
+    case Val of
+    undefined -> <<"">>;
+	Val when is_list(Val) ->
+		list_to_binary(Val);
+    _ -> 
+        Val
+    end.
