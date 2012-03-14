@@ -4,25 +4,20 @@
 -behaviour(gen_server).
 
 -export([start/2,
-     start_link/2,
-	 stop/1,
-	 log_user_receive/4,
-	 unix_timestamp/0,
-	 unix_timestamp/1,
-	 now_us/1,
-         check_if_undefined/1
-	 ]).
+    stop/1,
+    log_user_receive/4
+]).
 
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
- 		terminate/2, code_change/3]).
+-export([init/1, start_link/2, handle_call/3, handle_cast/2, handle_info/2,
+    terminate/2, code_change/3]).
 
 -include_lib("exmpp/include/exmpp.hrl").
 -include_lib("exmpp/include/exmpp_jid.hrl").
 
 -include("ejabberd.hrl").
 
-
 -define(PROCNAME, ?MODULE).
+-define(INTERVAL, 30000). % flush to mongo every 30 seconds
 
 -record(state, {
 	host,
@@ -31,50 +26,22 @@
 	conn
 }).
 
-
-start_link(Host, Opts) ->
-	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
-	gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
+%% gen_mod callbacks
 
 start(Host, Opts) ->
-	HostB = list_to_binary(Host),
-	?INFO_MSG("Starting ~p on ~p", [?MODULE, HostB]),
+    ?INFO_MSG("~p starting...", [?MODULE]),
+    HostB = list_to_binary(Host),
 	ejabberd_hooks:add(user_receive_packet, HostB, ?MODULE, log_user_receive, 55),
 	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
 
 	ChildSpec =
-			{Proc,               
-				{?MODULE, start_link, [Host, Opts]},
-				permanent,
-				50,
-				worker,
-				[?MODULE]},
+	    {Proc,
+	        {?MODULE, start_link, [Host, Opts]},
+	        temporary,
+	        1000,
+	        worker,
+	        [?MODULE]},
 	supervisor:start_child(ejabberd_sup, ChildSpec).
-
-init([_Host, Opts]) ->
-	?INFO_MSG("~p init", [?MODULE]),
-
-	Host = gen_mod:get_opt(hosts, Opts, ["localhost:27017"]),
-	DB = gen_mod:get_opt(db, Opts, "xmpp"),
-	Collection = gen_mod:get_opt(collection, Opts, "message"),
-	mongodb:replicaSets(xmpp_mongo, Host),
-	mongodb:connect(xmpp_mongo),
-	
-	Conn = mongoapi:new(xmpp_mongo, list_to_binary(DB)),
-	Conn:set_encode_style(mochijson),
-	{ok, #state{
-		host = Host,
-		db = DB,
-		collection = Collection,
-		conn = Conn
-	}}.
-
-
-terminate(_Reason, _State) ->
-	?INFO_MSG("Terminate called", []),
-	mongodb:deleteConnection(xmpp_mongo),
-	mongodb:stop(),
-	ok.
 
 stop(Host) ->
     HostB = list_to_binary(Host),
@@ -84,46 +51,82 @@ stop(Host) ->
 	supervisor:delete_child(ejabberd_sup, Proc),
     ok.
 
+
+%% gen_server callbacks
+
+start_link(Host, Opts) ->
+	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+	gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
+
+init([_Host, Opts]) ->
+    ?INFO_MSG("*** INIT", []),
+    ?MODULE = ets:new(?MODULE, [ordered_set, public, named_table]),
+	timer:send_interval(?INTERVAL, flush),
+	
+	Host = gen_mod:get_opt(hosts, Opts, ["localhost:27017"]),
+	DB = gen_mod:get_opt(db, Opts, "xmpp"),
+	Collection = gen_mod:get_opt(collection, Opts, "message"),
+	mongodb:replicaSets(xmpp_mongo, Host),
+	mongodb:connect(xmpp_mongo),
+	
+	Conn = mongoapi:new(xmpp_mongo, list_to_binary(DB)),
+	Conn:set_encode_style(mochijson),
+	
+	{ok, #state{
+		host = Host,
+		db = DB,
+		collection = Collection,
+		conn = Conn
+	}}.
+
+terminate(_Reason, _State) ->
+	mongodb:deleteConnection(xmpp_mongo),
+	ok.
+
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
 
-handle_call(stop, _From, State) ->
-	{stop, normal, State}.
+handle_call(Request, _From, State) ->
+	?INFO_MSG("Unexpected call: ~p", [Request]),
+	{reply, ok, State}.
 
-handle_cast({save,  FromJid, FromHost, FromResource, ToJid, ToHost, ToResource, Body, Type}, State) ->
-	#state{collection=Collection,conn=Conn} = State,
-    FromJid2 = check_if_undefined(FromJid),
-    FromHost2 = check_if_undefined(FromHost),
-    FromResource2 = check_if_undefined(FromResource),
-    ToJid2 = check_if_undefined(ToJid),
-    ToHost2 = check_if_undefined(ToHost),
-    ToResource2 = check_if_undefined(ToResource),
-          
-	Conn:save(Collection, [
-			{<<"from">>, FromJid2},
-			{<<"from_host">>, FromHost2},
-			{<<"from_resource">>, FromResource2},
-			{<<"to">>, ToJid2},
-			{<<"to_host">>, ToHost2},
-			{<<"to_resource">>, ToResource2},
-			{<<"content">>, Body},
-			{<<"timestamp">>, unix_timestamp()},
-			{<<"timestamp_micro">>, now_us(erlang:now())},
-			{<<"type">>, Type}
-		]),
-	{noreply, State}.
+handle_cast(Msg, State) ->
+    ?INFO_MSG("Unexpected cast: ~p", [Msg]),
+    {noreply, State}.
 
-handle_info({'DOWN', _MonitorRef, process, _Pid, _Info}, State) ->
-	{stop, connection_dropped, State};
+handle_info(flush, S=#state{conn=Conn, collection=Coll}) ->
+    ?INFO_MSG("flushing chat log to mongo...", []),
+
+    %% separate out the ets timestamps and records
+    {Keys, Vals} = lists:foldl(fun({Key, Val}, {Keys, Vals}) -> {[Key|Keys], 
+        [Val|Vals]} end, {[], []}, flush()),
+    
+    case {Keys, Vals} of
+        {[], []} ->
+            ok;
+        {Times, Recs} ->
+            %% insert the records into mongo
+            ok = Conn:batchInsert(Coll, Recs),
+            
+            %% remove the ets entries we just saved to mongo
+            lists:foldl(fun(Key, _) -> ets:delete(?MODULE, Key) end, [], Times),
+            ok
+    end,
+    
+    ?INFO_MSG("flushed ~p messages", [length(Keys)]),
+    {noreply, S};
 handle_info(Info, State) ->
-	?INFO_MSG("Got Info:~p, State:~p", [Info, State]),
-	{noreply, State}.
+    ?INFO_MSG("Unexpected info: ", [Info]),
+    {noreply, State}.
+
+%% ejabberd hook callback
 
 log_user_receive(Jid, From, To, Packet) ->
     log_packet(Jid, From, To, Packet).
-	
-log_packet(#jid{domain = Server}, From, To,
-		    Packet=#xmlel{name = 'message', attrs = Attrs, children = Els}) ->
+
+%% private
+
+log_packet(_, From, To, Packet=#xmlel{name='message', attrs=Attrs}) ->
     Type = exmpp_xml:get_attribute_from_list(Attrs, <<"type">>, <<>>),
 	case Type of
 		"error" -> %% we don't log errors
@@ -131,11 +134,9 @@ log_packet(#jid{domain = Server}, From, To,
 			ok;
 		_ ->
 			save_packet(From, To, Packet, Type)
-	end;
-    
+	end;    
 log_packet(_JID, _From, _To, _Packet) ->
     ok.
-
 
 save_packet(From, To, Packet, Type) ->
 	Body = exmpp_xml:get_cdata(exmpp_xml:get_element(Packet, "body")),
@@ -144,22 +145,47 @@ save_packet(From, To, Packet, Type) ->
 			?DEBUG("not logging empty message from ~p",[From]),
 			ok;
 		_ ->
+			
 			FromJid = exmpp_jid:prep_node_as_list(From),
 			FromHost = exmpp_jid:prep_domain_as_list(From),
 			FromResource = exmpp_jid:prep_resource_as_list(From),
 			ToJid = exmpp_jid:prep_node_as_list(To),
 			ToHost = exmpp_jid:prep_domain_as_list(To),
-			ToResource = exmpp_jid:prep_resource_as_list(To),
-			Proc = gen_mod:get_module_proc(ToHost, ?PROCNAME),
-			gen_server:cast(Proc, {save, FromJid, FromHost, FromResource, ToJid, ToHost, ToResource, Body, Type})
+			ToResource = exmpp_jid:prep_resource_as_list(To),			
+			Timestamp = unix_timestamp(),
+			MicroTime = now_us(erlang:now()),
+			
+			Rec = {MicroTime, [
+			    {<<"from">>, prepare(FromJid)},
+                {<<"from_host">>, prepare(FromHost)},
+                {<<"from_resource">>, prepare(FromResource)},
+                {<<"to">>, prepare(ToJid)},
+                {<<"to_host">>, prepare(ToHost)},
+                {<<"to_resource">>, prepare(ToResource)},
+                {<<"content">>, Body},
+                {<<"timestamp">>, Timestamp},
+                {<<"timestamp_micro">>, MicroTime},
+                {<<"type">>, Type}
+            ]},
+
+			ets:insert(?MODULE, Rec)
 	end.
-	
+
+flush() ->
+    flush(now_us(erlang:now()), [], ets:next(?MODULE, 0)).
+
+flush(_, Acc, '$end_of_table') ->
+    Acc;
+flush(MaxKey, Acc, CurrKey) when CurrKey < MaxKey ->
+    [Res] = ets:lookup(?MODULE, CurrKey),
+    flush(MaxKey, [Res|Acc], ets:next(?MODULE, CurrKey));
+flush(MaxKey, Acc, CurrKey) when CurrKey >= MaxKey ->
+    Acc.
 
 unix_timestamp() ->
     unix_timestamp(calendar:universal_time()).
 
 unix_timestamp(DT) ->
-    %LocalEpoch = calendar:universal_time_to_local_time({{1970,1,1},{0,0,0}}),
     Epoch = {{1970,1,1},{0,0,0}},
     calendar:datetime_to_gregorian_seconds(DT) -
         calendar:datetime_to_gregorian_seconds(Epoch).
@@ -167,11 +193,12 @@ unix_timestamp(DT) ->
 now_us({MegaSecs,Secs,MicroSecs}) ->
 	(MegaSecs*1000000 + Secs)*1000000 + MicroSecs. 
 
-check_if_undefined(Val) ->
+prepare(Val) ->
     case Val of
-    undefined -> <<"">>;
-	Val when is_list(Val) ->
-		list_to_binary(Val);
-    _ -> 
-        Val
+        undefined -> 
+            <<"">>;
+	    Val when is_list(Val) ->
+		    list_to_binary(Val);
+        _ -> 
+            Val
     end.

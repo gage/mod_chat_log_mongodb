@@ -1,0 +1,1 @@
+erl -pa ../../lager/ebin ../../erlmongo/ebin -config dev -s lager -eval "application:start(erlmongo)" -s ejabberd -boot start_sasl
