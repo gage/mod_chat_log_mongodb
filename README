@@ -6,3 +6,9 @@ erlmongo
 
 ejabberd.cfg
 {mod_chat_log_mongodb, [{hosts, ["localhost:27017"]}, {db, "xmpp"}, {collection, "message"}]},
+
+* Usage
+
+I've included a sample ./run script to get things up and running quickly.  You'll need
+to change paths and remove the lager portion if you don't use it.  In production these
+should probably be real app dependencies.
