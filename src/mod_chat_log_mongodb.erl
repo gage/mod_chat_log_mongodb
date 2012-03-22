@@ -156,16 +156,16 @@ save_packet(From, To, Packet, Type) ->
 			MicroTime = now_us(erlang:now()),
 			
 			Rec = {MicroTime, [
-			    {<<"from">>, prepare(FromJid)},
+			    {<<"from_user">>, prepare(FromJid)},
                 {<<"from_host">>, prepare(FromHost)},
                 {<<"from_resource">>, prepare(FromResource)},
-                {<<"to">>, prepare(ToJid)},
+                {<<"to_user">>, prepare(ToJid)},
                 {<<"to_host">>, prepare(ToHost)},
                 {<<"to_resource">>, prepare(ToResource)},
                 {<<"content">>, Body},
                 {<<"timestamp">>, Timestamp},
                 {<<"timestamp_micro">>, MicroTime},
-                {<<"type">>, Type}
+                {<<"msg_type">>, Type}
             ]},
 
 			ets:insert(?MODULE, Rec)
