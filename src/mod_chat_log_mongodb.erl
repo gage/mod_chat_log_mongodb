@@ -154,9 +154,13 @@ save_packet(From, To, Packet, Type) ->
 			ToResource = exmpp_jid:prep_resource_as_list(To),			
 			Timestamp = unix_timestamp(),
 			MicroTime = now_us(erlang:now()),
-			
-			Rec = {MicroTime, [
-			    {<<"from_user">>, prepare(FromJid)},
+
+            if
+            Body == <<" has set the subject to: ">>, FromResource == undefined ->
+            ok;
+            true ->
+            Rec = {MicroTime, [
+	        {<<"from_user">>, prepare(FromJid)},
                 {<<"from_host">>, prepare(FromHost)},
                 {<<"from_resource">>, prepare(FromResource)},
                 {<<"to_user">>, prepare(ToJid)},
@@ -167,8 +171,8 @@ save_packet(From, To, Packet, Type) ->
                 {<<"timestamp_micro">>, MicroTime},
                 {<<"msg_type">>, Type}
             ]},
-
-			ets:insert(?MODULE, Rec)
+            ets:insert(?MODULE, Rec)
+            end
 	end.
 
 flush() ->
