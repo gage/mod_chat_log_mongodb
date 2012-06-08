@@ -45,7 +45,7 @@ start(Host, Opts) ->
 
 stop(Host) ->
     HostB = list_to_binary(Host),
-    ejabberd_hooks:delete(user_receive_packet, HostB, ?MODULE, log_user_receive, 50),
+    ejabberd_hooks:delete(user_send_packet, HostB, ?MODULE, log_user_receive, 50),
 	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
 	gen_server:call(Proc, stop),
 	supervisor:delete_child(ejabberd_sup, Proc),
@@ -156,9 +156,7 @@ save_packet(From, To, Packet, Type) ->
 			MicroTime = now_us(erlang:now()),
 
             if
-            Body == <<" has set the subject to: ">>, FromResource == undefined ->
-            ok;
-            true ->
+            FromResource == ToJid ->
             Rec = {MicroTime, [
 	        {<<"from_user">>, prepare(FromJid)},
                 {<<"from_host">>, prepare(FromHost)},
