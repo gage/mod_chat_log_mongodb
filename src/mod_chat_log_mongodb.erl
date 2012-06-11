@@ -5,7 +5,7 @@
 
 -export([start/2,
     stop/1,
-    log_user_receive/4
+    log_user_send/3
 ]).
 
 -export([init/1, start_link/2, handle_call/3, handle_cast/2, handle_info/2,
@@ -31,7 +31,7 @@
 start(Host, Opts) ->
     ?INFO_MSG("~p starting...", [?MODULE]),
     HostB = list_to_binary(Host),
-	ejabberd_hooks:add(user_receive_packet, HostB, ?MODULE, log_user_receive, 55),
+	ejabberd_hooks:add(user_send_packet, HostB, ?MODULE, log_user_send, 55),
 	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
 
 	ChildSpec =
@@ -45,7 +45,7 @@ start(Host, Opts) ->
 
 stop(Host) ->
     HostB = list_to_binary(Host),
-    ejabberd_hooks:delete(user_send_packet, HostB, ?MODULE, log_user_receive, 50),
+    ejabberd_hooks:delete(user_send_packet, HostB, ?MODULE, log_user_send, 50),
 	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
 	gen_server:call(Proc, stop),
 	supervisor:delete_child(ejabberd_sup, Proc),
@@ -121,8 +121,8 @@ handle_info(Info, State) ->
 
 %% ejabberd hook callback
 
-log_user_receive(Jid, From, To, Packet) ->
-    log_packet(Jid, From, To, Packet).
+log_user_send(From, To, Packet) ->
+    log_packet(From, To, Packet).
 
 %% private
 
@@ -155,13 +155,11 @@ save_packet(From, To, Packet, Type) ->
 			Timestamp = unix_timestamp(),
 			MicroTime = now_us(erlang:now()),
 
-            if
-            FromResource == ToJid ->
             Rec = {MicroTime, [
-	        {<<"from_user">>, prepare(FromJid)},
+	        	{<<"_from_user">>, prepare(FromJid)},
                 {<<"from_host">>, prepare(FromHost)},
                 {<<"from_resource">>, prepare(FromResource)},
-                {<<"to_user">>, prepare(ToJid)},
+                {<<"_to_group">>, prepare(ToJid)},
                 {<<"to_host">>, prepare(ToHost)},
                 {<<"to_resource">>, prepare(ToResource)},
                 {<<"content">>, Body},
@@ -170,7 +168,6 @@ save_packet(From, To, Packet, Type) ->
                 {<<"msg_type">>, Type}
             ]},
             ets:insert(?MODULE, Rec)
-            end
 	end.
 
 flush() ->
