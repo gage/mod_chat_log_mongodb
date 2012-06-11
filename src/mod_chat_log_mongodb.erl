@@ -17,7 +17,7 @@
 -include("ejabberd.hrl").
 
 -define(PROCNAME, ?MODULE).
--define(INTERVAL, 30000). % flush to mongo every 30 seconds
+-define(INTERVAL, 1000). % flush to mongo every 30 seconds
 
 -record(state, {
 	host,
