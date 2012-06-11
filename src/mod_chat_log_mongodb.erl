@@ -126,7 +126,7 @@ log_user_send(From, To, Packet) ->
 
 %% private
 
-log_packet(_, From, To, Packet=#xmlel{name='message', attrs=Attrs}) ->
+log_packet(From, To, Packet=#xmlel{name='message', attrs=Attrs}) ->
     Type = exmpp_xml:get_attribute_from_list(Attrs, <<"type">>, <<>>),
 	case Type of
 		"error" -> %% we don't log errors
@@ -135,7 +135,7 @@ log_packet(_, From, To, Packet=#xmlel{name='message', attrs=Attrs}) ->
 		_ ->
 			save_packet(From, To, Packet, Type)
 	end;    
-log_packet(_JID, _From, _To, _Packet) ->
+log_packet(_From, _To, _Packet) ->
     ok.
 
 save_packet(From, To, Packet, Type) ->
