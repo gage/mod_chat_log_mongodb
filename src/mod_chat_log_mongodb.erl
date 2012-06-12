@@ -17,7 +17,7 @@
 -include("ejabberd.hrl").
 
 -define(PROCNAME, ?MODULE).
--define(INTERVAL, 1000). % flush to mongo every 30 seconds
+-define(INTERVAL, 2000). % flush to mongo every 2 seconds
 
 -record(state, {
 	host,
@@ -140,6 +140,7 @@ log_packet(_From, _To, _Packet) ->
 
 save_packet(From, To, Packet, Type) ->
 	Body = exmpp_xml:get_cdata(exmpp_xml:get_element(Packet, "body")),
+	MsgUUID = exmpp_xml:get_attribute_as_binary(Packet, <<"msguuid">>, ""),
 	case Body of
 		<<"">> -> %% don't log empty messages
 			?DEBUG("not logging empty message from ~p",[From]),
@@ -165,7 +166,8 @@ save_packet(From, To, Packet, Type) ->
                 {<<"content">>, Body},
                 {<<"timestamp">>, Timestamp},
                 {<<"timestamp_micro">>, MicroTime},
-                {<<"msg_type">>, Type}
+                {<<"msg_type">>, Type},
+                {<<"msg_uuid">>, MsgUUID}
             ]},
             ets:insert(?MODULE, Rec)
 	end.
