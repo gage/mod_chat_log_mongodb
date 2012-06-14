@@ -17,7 +17,7 @@
 -include("ejabberd.hrl").
 
 -define(PROCNAME, ?MODULE).
--define(INTERVAL, 2000). % flush to mongo every 2 seconds
+-define(INTERVAL, 1000). % flush to mongo every 2 seconds
 
 -record(state, {
 	host,
@@ -56,12 +56,13 @@ stop(Host) ->
 
 start_link(Host, Opts) ->
 	Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
+	?INFO_MSG("*** ********** ~p", [Proc]),
 	gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
 
 init([_Host, Opts]) ->
     ?INFO_MSG("*** INIT", []),
     ?MODULE = ets:new(?MODULE, [ordered_set, public, named_table]),
-	timer:send_interval(?INTERVAL, flush),
+	%timer:send_interval(?INTERVAL, flush),
 	
 	Host = gen_mod:get_opt(hosts, Opts, ["localhost:27017"]),
 	DB = gen_mod:get_opt(db, Opts, "xmpp"),
@@ -90,12 +91,13 @@ handle_call(Request, _From, State) ->
 	?INFO_MSG("Unexpected call: ~p", [Request]),
 	{reply, ok, State}.
 
-handle_cast(Msg, State) ->
-    ?INFO_MSG("Unexpected cast: ~p", [Msg]),
-    {noreply, State}.
+handle_cast({save, Rec}, S=#state{conn=Conn, collection=Coll}) ->
+    %?INFO_MSG("Save Message: ~p", [Rec]),
+    Conn:save(Coll, Rec),
+    {noreply, S}.
 
 handle_info(flush, S=#state{conn=Conn, collection=Coll}) ->
-    ?INFO_MSG("flushing chat log to mongo...", []),
+    %?INFO_MSG("flushing chat log to mongo...", []),
 
     %% separate out the ets timestamps and records
     {Keys, Vals} = lists:foldl(fun({Key, Val}, {Keys, Vals}) -> {[Key|Keys], 
@@ -113,10 +115,10 @@ handle_info(flush, S=#state{conn=Conn, collection=Coll}) ->
             ok
     end,
     
-    ?INFO_MSG("flushed ~p messages", [length(Keys)]),
+    %?INFO_MSG("flushed ~p messages", [length(Keys)]),
     {noreply, S};
 handle_info(Info, State) ->
-    ?INFO_MSG("Unexpected info: ", [Info]),
+    %?INFO_MSG("Unexpected info: ", [Info]),
     {noreply, State}.
 
 %% ejabberd hook callback
@@ -156,7 +158,21 @@ save_packet(From, To, Packet, Type) ->
 			Timestamp = unix_timestamp(),
 			MicroTime = now_us(erlang:now()),
 
-            Rec = {MicroTime, [
+          %   Rec = {MicroTime, [
+	        	% {<<"_from_user">>, prepare(FromJid)},
+          %       {<<"from_host">>, prepare(FromHost)},
+          %       {<<"from_resource">>, prepare(FromResource)},
+          %       {<<"_to_group">>, prepare(ToJid)},
+          %       {<<"to_host">>, prepare(ToHost)},
+          %       {<<"to_resource">>, prepare(ToResource)},
+          %       {<<"content">>, Body},
+          %       {<<"timestamp">>, Timestamp},
+          %       {<<"timestamp_micro">>, MicroTime},
+          %       {<<"msg_type">>, Type},
+          %       {<<"msg_uuid">>, MsgUUID}
+          %   ]},
+          %   ets:insert(?MODULE, Rec)
+          	Rec = [
 	        	{<<"_from_user">>, prepare(FromJid)},
                 {<<"from_host">>, prepare(FromHost)},
                 {<<"from_resource">>, prepare(FromResource)},
@@ -168,8 +184,13 @@ save_packet(From, To, Packet, Type) ->
                 {<<"timestamp_micro">>, MicroTime},
                 {<<"msg_type">>, Type},
                 {<<"msg_uuid">>, MsgUUID}
-            ]},
-            ets:insert(?MODULE, Rec)
+            ],
+            %?INFO_MSG("ready to send... ~p", [Rec]),
+            Proc = gen_mod:get_module_proc(FromHost, ?PROCNAME),
+            %?INFO_MSG("ready to send...proc ~p", [Proc]),
+            gen_server:cast(Proc, {save, Rec})
+            %?INFO_MSG("ready to sended ~p", [Proc])
+            % ets:insert(?MODULE, Rec)
 	end.
 
 flush() ->
