@@ -61,7 +61,7 @@ start_link(Host, Opts) ->
 
 init([_Host, Opts]) ->
     ?INFO_MSG("*** INIT", []),
-    ?MODULE = ets:new(?MODULE, [ordered_set, public, named_table]),
+    %?MODULE = ets:new(?MODULE, [ordered_set, public, named_table]),
 	%timer:send_interval(?INTERVAL, flush),
 	
 	Host = gen_mod:get_opt(hosts, Opts, ["localhost:27017"]),
