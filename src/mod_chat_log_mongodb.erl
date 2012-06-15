@@ -185,11 +185,11 @@ save_packet(From, To, Packet, Type) ->
                 {<<"msg_type">>, Type},
                 {<<"msg_uuid">>, MsgUUID}
             ],
-            %?INFO_MSG("ready to send... ~p", [Rec]),
+            ?INFO_MSG("ready to send... ~p", [Rec]),
             Proc = gen_mod:get_module_proc(FromHost, ?PROCNAME),
-            %?INFO_MSG("ready to send...proc ~p", [Proc]),
-            gen_server:cast(Proc, {save, Rec})
-            %?INFO_MSG("ready to sended ~p", [Proc])
+            ?INFO_MSG("ready to send...proc ~p", [Proc]),
+            gen_server:cast(Proc, {save, Rec}),
+            ?INFO_MSG("ready to sended ~p", [Proc])
             % ets:insert(?MODULE, Rec)
 	end.
 
