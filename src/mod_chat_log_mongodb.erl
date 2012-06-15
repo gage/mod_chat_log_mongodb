@@ -92,7 +92,7 @@ handle_call(Request, _From, State) ->
 	{reply, ok, State}.
 
 handle_cast({save, Rec}, S=#state{conn=Conn, collection=Coll}) ->
-    %?INFO_MSG("Save Message: ~p", [Rec]),
+    ?INFO_MSG("Save Message: ~p", [Rec]),
     Conn:save(Coll, Rec),
     {noreply, S}.
 
