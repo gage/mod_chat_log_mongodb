@@ -183,7 +183,9 @@ save_packet(From, To, Packet, Type) ->
                 {<<"timestamp">>, Timestamp},
                 {<<"timestamp_micro">>, MicroTime},
                 {<<"msg_type">>, Type},
-                {<<"msg_uuid">>, MsgUUID}
+                {<<"msg_uuid">>, MsgUUID},
+                {<<"in_timeline">>, false},
+                {<<"_doing_timeline">>, false}
             ],
             ?INFO_MSG("ready to send... ~p", [Rec]),
             Proc = gen_mod:get_module_proc(FromHost, ?PROCNAME),
